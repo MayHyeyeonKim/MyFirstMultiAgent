@@ -23,20 +23,20 @@ os.environ["OPENAI_MODEL_NAME"] = model_name
 
 
 # Tool
-class LimitedScrapeTool(ScrapeWebsiteTool):  # Tool이 지금 안 쓰이고 있는데????
-    def run(self, input: str) -> str:
-        print("🌐 Scraping URL:", input, flush=True)
-
-        raw_content = super().run(input)
-        print("🔍 Original content length (characters):", len(raw_content), flush=True)
+class LimitedScrapeTool(ScrapeWebsiteTool):
+    def _run(self, *args, **kwargs) -> str:
+        url = kwargs.get("url", self.website_url)
+        print(f"\n🌐 Scraping URL: {url}", flush=True)
+        raw = super()._run(*args, **kwargs)
+        print("🔍 Original length:", len(raw), flush=True)
 
         try:
             enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
         except Exception as e:
             print("🚨 Tokenizer loading failed:", e, flush=True)
-            return raw_content[:1000]
+            return raw[:1000]
 
-        tokens = enc.encode(raw_content)
+        tokens = enc.encode(raw)
         print("🧮 Original token count:", len(tokens), flush=True)
 
         max_token_limit = 1000
@@ -87,7 +87,7 @@ editor = Agent(
 scrape_tool = LimitedScrapeTool(
     # website_url="https://en.wikipedia.org/wiki/Artificial_intelligence"
     website_url="https://www.ibm.com/topics/artificial-intelligence"
-)
+)  # CrewAI 내부에서는 툴을 실행할 때 직접 LimitedScrapeTool._run() 을 호출
 
 plan = Task(
     description=(
@@ -150,3 +150,9 @@ if __name__ == "__main__":
 
     with open(output_path, "w") as f:
         f.write(result)
+
+# 실제 호출 흐름:
+# crew.kickoff()
+#   └─> AgentExecutor sees “Read website content”
+#         └─> scrape_tool.run(...)  # BaseTool.run
+#               └─> scrape_tool._run(...)  # override 한 곳!
