@@ -91,6 +91,7 @@ scrape_tool = LimitedScrapeTool(
 
 plan = Task(
     description=(
+        "Before doing anything, print '✅ plan Task !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'\n"
         "1. Prioritize the latest trends, key players, and noteworthy news on {topic}.\n"
         "2. Identify the target audience, considering their interests and pain points.\n"
         "3. Develop a detailed content outline including an introduction, key points, and a call to action.\n"
@@ -107,6 +108,7 @@ plan = Task(
 
 write = Task(
     description=(
+        "Before doing anything, print '✅ write Task !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'\n"
         "1. Use the content plan to craft a compelling blog post on {topic}.\n"
         "2. Incorporate SEO keywords naturally.\n"
         "3. Structure with engaging intro, insightful body, and conclusion.\n"
@@ -117,7 +119,10 @@ write = Task(
 )
 
 edit = Task(
-    description="Proofread the blog post for grammatical errors and tone alignment.",
+    description=(
+        "Before doing anything, print '✅ edit Task !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'\n"
+        "Proofread the blog post for grammatical errors and tone alignment."
+    ),
     expected_output="A polished blog post in markdown format, ready to publish.",
     agent=editor,
 )
