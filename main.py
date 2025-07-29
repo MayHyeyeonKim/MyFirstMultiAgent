@@ -131,7 +131,7 @@ edit = Task(
 crew = Crew(
     agents=[planner, writer, editor],
     tasks=[plan, write, edit],
-    verbose=2,
+    verbose=True,
     memory=False,  # Enables short-term memory in CrewAI
     # long-term memory and entity memory are not currently supported in CrewAI
     # To persist knowledge across runs or track entities, manual implementation or integration with external memory backends (e.g., LangChain, ChromaDB) is required.
@@ -141,6 +141,7 @@ crew = Crew(
 if __name__ == "__main__":
     topic = "Artificial Intelligence"  # ← 원하는 토픽으로 변경 가능
     result = crew.kickoff(inputs={"topic": topic})
+    text = str(result)
 
     # 결과 출력
     print(result)
@@ -154,7 +155,7 @@ if __name__ == "__main__":
     output_path = os.path.join(output_dir, filename)
 
     with open(output_path, "w") as f:
-        f.write(result)
+        f.write(text)
 
 # 실제 호출 흐름:
 # crew.kickoff()
