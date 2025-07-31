@@ -2,10 +2,10 @@ import os
 import warnings
 from dotenv import load_dotenv
 from crewai import Agent, Task, Crew
-from crewai_tools import ScrapeWebsiteTool
+from crewai_tools import Tool
+import requests
 import tiktoken
 from datetime import datetime
-from IPython.display import Markdown  # Jupyter에서 쓸 경우만 사용됨
 
 # 경고 숨기기
 warnings.filterwarnings("ignore")
@@ -21,32 +21,47 @@ model_name = os.getenv("OPENAI_MODEL_NAME", "gpt-3.5-turbo")
 os.environ["OPENAI_API_KEY"] = openai_api_key
 os.environ["OPENAI_MODEL_NAME"] = model_name
 
+# === Custom Tool Functions ===
 
-# Tool
-class LimitedScrapeTool(ScrapeWebsiteTool):
-    def _run(self, *args, **kwargs) -> str:
-        url = kwargs.get("url", self.website_url)
-        print(f"\n🌐 Scraping URL: {url}", flush=True)
-        raw = super()._run(*args, **kwargs)
-        print("🔍 Original length:", len(raw), flush=True)
 
-        try:
-            enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
-        except Exception as e:
-            print("🚨 Tokenizer loading failed:", e, flush=True)
-            return raw[:1000]
+def limited_scrape(url: str) -> str:
+    print(f"🌐 Scraping URL: {url}")
+    try:
+        response = requests.get(url)
+        text = response.text
+    except Exception as e:
+        return f"❌ Error fetching URL: {str(e)}"
 
-        tokens = enc.encode(raw)
-        print("🧮 Original token count:", len(tokens), flush=True)
-
-        max_token_limit = 1000
-        shortened = enc.decode(tokens[:max_token_limit])
-        print("✂️ Truncated to token count:", max_token_limit, flush=True)
-
+    try:
+        enc = tiktoken.encoding_for_model("gpt-3.5-turbo")
+        tokens = enc.encode(text)
+        shortened = enc.decode(tokens[:1000])
         return shortened
+    except Exception as e:
+        return text[:2000]
 
+
+def simple_sentiment(**kwargs) -> str:
+    text = kwargs.get("text", "")
+    return "positive" if "great" in text else "neutral"
+
+
+# === Tools (Tool 클래스로 생성) ===
+
+scrape_tool = Tool(
+    name="Limited Web Scraper",
+    description="Scrapes a website and returns the first 1000 tokens of text content.",
+    func=limited_scrape,
+)
+
+sentiment_tool = Tool(
+    name="Sentiment Analysis Tool",
+    description="Checks if text sentiment is positive.",
+    func=simple_sentiment,
+)
 
 # === Agents 정의 ===
+
 planner = Agent(
     role="Content Planner",
     goal="Plan engaging and factually accurate content on {topic}",
@@ -65,7 +80,7 @@ writer = Agent(
     backstory=(
         "You're writing an opinion piece about the topic: {topic}. "
         "You base your writing on the Content Planner's work and provide objective and impartial insights."
-        "Always support your edits with clear rationale. Do not guess or make assumptions without evidence."  # Gardrails
+        "Always support your edits with clear rationale. Do not guess or make assumptions without evidence."  # Guardrails
     ),
     allow_delegation=True,  # Cooperation with other agents is allowed, if Writer needs help, Writer can ask Planner or Editor for assistance
     verbose=True,
@@ -76,18 +91,13 @@ editor = Agent(
     goal="Edit a given blog post to align with the writing style of the organization.",
     backstory=(
         "You're an editor reviewing a blog post for clarity, tone, and journalistic best practices."
-        "Avoid speculation. Only provide answers that are supported by facts or reliable sources."  # Gardrails
+        "Avoid speculation. Only provide answers that are supported by facts or reliable sources."  # Guardrails
     ),
     allow_delegation=False,
     verbose=True,
 )
 
 # === Tasks 정의 ===
-
-scrape_tool = LimitedScrapeTool(
-    # website_url="https://en.wikipedia.org/wiki/Artificial_intelligence"
-    website_url="https://www.ibm.com/topics/artificial-intelligence"
-)  # CrewAI 내부에서는 툴을 실행할 때 직접 LimitedScrapeTool._run() 을 호출
 
 plan = Task(
     description=(
@@ -98,11 +108,14 @@ plan = Task(
         "4. Include SEO keywords and relevant data or sources."
     ),
     expected_output=(
-        "A comprehensive content plan with outline, audience analysis, SEO keywords, and resources."
+        "A comprehensive content plan with outline, audience analysis, SEO keywords, and resources.\n"
+        "The entire response MUST be enclosed in a markdown code block like this:\n\n"
+        "```markdown\n"
+        "# Content Plan\n"
+        "...\n"
+        "```"
     ),
-    tools=[
-        scrape_tool
-    ],  # Tool assigned at Task level (overrides Agent-level tools if both are set)
+    tools=[scrape_tool, sentiment_tool],
     agent=planner,
 )
 
@@ -124,10 +137,12 @@ edit = Task(
         "Proofread the blog post for grammatical errors and tone alignment."
     ),
     expected_output="A polished blog post in markdown format, ready to publish.",
+    tools=[sentiment_tool],
     agent=editor,
 )
 
-# === Crew 구성 ===
+# === Crew 정의 ===
+
 crew = Crew(
     agents=[planner, writer, editor],
     tasks=[plan, write, edit],
@@ -138,14 +153,14 @@ crew = Crew(
 )
 
 # === 실행 === python main.py
+
 if __name__ == "__main__":
-    topic = "Artificial Intelligence"  # ← 원하는 토픽으로 변경 가능
+    topic = "Artificial Intelligence"
     result = crew.kickoff(inputs={"topic": topic})
-    text = str(result)
+    text = f"```markdown\n{str(result)}\n```"
 
     # 결과 출력
-    print(result)
-    # Markdown(result)  # ← Jupyter Notebook에서만 사용 (VS Code에서는 생략)
+    print(text)
 
     # === 저장 ===
     output_dir = "outputs"
@@ -156,9 +171,3 @@ if __name__ == "__main__":
 
     with open(output_path, "w") as f:
         f.write(text)
-
-# 실제 호출 흐름:
-# crew.kickoff()
-#   └─> AgentExecutor sees “Read website content”
-#         └─> scrape_tool.run(...)  # BaseTool.run
-#               └─> scrape_tool._run(...)  # override 한 곳!
