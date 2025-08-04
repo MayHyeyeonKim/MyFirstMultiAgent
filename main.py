@@ -98,7 +98,11 @@ plan = Task(
         "4. Include SEO keywords and relevant data or sources."
     ),
     expected_output=(
-        "A comprehensive content plan with outline, audience analysis, SEO keywords, and resources."
+        "A JSON object containing the following fields:\n"
+        "- 'outline': list of blog sections with titles\n"
+        "- 'audience': target demographics and pain points\n"
+        "- 'keywords': list of suggested SEO keywords\n"
+        "- 'sources': list of URLs or references used during research"
     ),
     tools=[
         scrape_tool
@@ -108,22 +112,42 @@ plan = Task(
 
 write = Task(
     description=(
-        "Before doing anything, print '✅ write Task !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'\n"
-        "1. Use the content plan to craft a compelling blog post on {topic}.\n"
-        "2. Incorporate SEO keywords naturally.\n"
-        "3. Structure with engaging intro, insightful body, and conclusion.\n"
-        "4. Proofread and follow brand's voice."
+        "Step 1 is done. Now proceed with Step 2.\n"
+        "Use the selected blog title: {selected_title} as the main heading.\n"
+        "Then write the blog post with the following structure:\n"
+        "- Introduction (2–3 paragraphs)\n"
+        "- Body (multiple well-structured sections)\n"
+        "- Conclusion (summary + call to action)\n"
+        "The blog must:\n"
+        "- Incorporate SEO keywords naturally\n"
+        "- Link to reliable sources when appropriate\n"
+        "- Use markdown formatting with proper heading levels (###) and bullet points if helpful\n"
+        "- Maintain a consistent and professional tone aligned with our brand"
     ),
-    expected_output="A blog post in markdown format, each section 2~3 paragraphs.",
+    expected_output=(
+        "A blog post in markdown format, including the following sections:\n"
+        "- Introduction (2~3 paragraphs)\n"
+        "- Body (well-structured, multiple sections)\n"
+        "- Conclusion (summary + call to action)\n"
+        "The post must:\n"
+        "- Naturally include SEO keywords\n"
+        "- Link to relevant sources where appropriate\n"
+        "- Use heading levels (###) and bullet points if helpful"
+    ),
     agent=writer,
-)
+)  # 만약 여러 writer가 동시에 다른 섹션을 쓰게 한다면? → Task들을 Crew(parallel=True)로 설정. (현재 코드 구조에선 단일 흐름이라 해당 없음. 다중 콘텐츠 생산 시 고려 가능) <- 이건 구조가 독립적일 때는 맞는 말
+# Crew의 마지막 단계에서 여러 task를 병렬로 배치하는 경우 → CrewAI 구조상 마지막 task들은 병렬로 처리되지 않음
 
 edit = Task(
-    description=(
-        "Before doing anything, print '✅ edit Task !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'\n"
-        "Proofread the blog post for grammatical errors and tone alignment."
+    description=("Proofread the blog post for grammatical errors and tone alignment."),
+    expected_output=(
+        "A final, professionally edited blog post in markdown format.\n"
+        "The post should:\n"
+        "- Be free of grammatical and spelling errors\n"
+        "- Follow brand tone and journalistic style\n"
+        "- Maintain the structure and intent of the original content\n"
+        "- Be publication-ready"
     ),
-    expected_output="A polished blog post in markdown format, ready to publish.",
     agent=editor,
 )
 
@@ -131,31 +155,57 @@ edit = Task(
 crew = Crew(
     agents=[planner, writer, editor],
     tasks=[plan, write, edit],
-    verbose=True,
+    verbose=False,
     memory=False,  # Enables short-term memory in CrewAI
     # long-term memory and entity memory are not currently supported in CrewAI
     # To persist knowledge across runs or track entities, manual implementation or integration with external memory backends (e.g., LangChain, ChromaDB) is required.
 )
 
-# === 실행 === python main.py
 if __name__ == "__main__":
-    topic = "Artificial Intelligence"  # ← 원하는 토픽으로 변경 가능
-    result = crew.kickoff(inputs={"topic": topic})
-    text = str(result)
+    topic = "Artificial Intelligence"
 
-    # 결과 출력
+    # Step 1: 제목 3개만 먼저 생성 (writer agent만 사용한 단독 task로 처리)
+    preview_write = Task(
+        description=(
+            "Generate 3 creative and engaging blog post title options related to the topic: {topic}.\n"
+            "Format them as a numbered list like this:\n"
+            "1. ...\n"
+            "2. ...\n"
+            "3. ...\n"
+            "Pause and wait for the user to choose one."
+        ),
+        expected_output="Three numbered blog title options based on the topic.",
+        agent=writer,
+    )
+
+    temp_crew = Crew(agents=[writer], tasks=[preview_write], verbose=True)
+    result = temp_crew.kickoff(inputs={"topic": topic})
     print(result)
-    # Markdown(result)  # ← Jupyter Notebook에서만 사용 (VS Code에서는 생략)
 
-    # === 저장 ===
+    # 사용자 선택 받기
+    print("\n👀 Please choose one of the suggested titles (1, 2, or 3):")
+    selected_title = input("👉 Your selected blog title: ").strip()
+
+    # 선택된 제목을 본문 작성에 반영하여 main crew 시작
+    final_result = crew.kickoff(
+        inputs={"topic": topic, "selected_title": selected_title}
+    )
+    text = str(final_result)
+
+    print(final_result)
+
+    # ✅ "###"부터 시작하는 부분만 추출해서 저장
+    markdown_start_index = text.find("###")
+    cleaned_text = text[markdown_start_index:] if markdown_start_index != -1 else text
+
+    # 저장
     output_dir = "outputs"
     os.makedirs(output_dir, exist_ok=True)
-
     filename = f"blog_{datetime.now().strftime('%Y%m%d_%H%M%S')}.md"
     output_path = os.path.join(output_dir, filename)
 
     with open(output_path, "w") as f:
-        f.write(text)
+        f.write(cleaned_text)
 
 # 실제 호출 흐름:
 # crew.kickoff()
