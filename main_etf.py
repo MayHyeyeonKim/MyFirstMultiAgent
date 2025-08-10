@@ -1,25 +1,49 @@
+import os
+from datetime import datetime
+
+# 텔레메트리 비활성화 (임포트 전에!)
+os.environ["CREWAI_TELEMETRY_ENABLED"] = "false"
+os.environ["OTEL_SDK_DISABLED"] = "true"
+
 from crewai import Agent, Task, Crew, LLM, Process
 import warnings
-import os
 
 warnings.filterwarnings("ignore")
 
 
 def build_llm():
     # 로컬 Ollama LLM
-    local_llm = LLM(model="ollama/gpt-oss:20b", base_url="http://localhost:11434")
-    return local_llm
+    return LLM(model="ollama/llama3:8b", base_url="http://localhost:11434")
 
 
-# 연결 테스트 (선택)
-def test_llm(my_llm):
-    try:
-        print("Testing Local LLM...")
-        response = my_llm.invoke("안녕, 연결 테스트 문장입니다.")
-        print("✅ Local LLM connected successfully!")
-        print(f"Response: {response}")
-    except Exception as e:
-        print(f"❌ Local LLM connection failed: {e}")
+def save_markdown_like_example(result_obj):
+    """
+    예시처럼: result를 문자열로 변환 → 첫 헤딩(#/##/###) 위치부터만 저장
+    파일명: output_etfblogger/etf_YYYYMMDD_HHMMSS.md
+    """
+    # 1) 문자열화
+    text = getattr(result_obj, "raw", None)
+    if not isinstance(text, str):
+        text = str(result_obj)
+
+    # 2) 헤딩 시작 위치 찾기 (# → ## → ### 우선순위)
+    start = -1
+    for marker in ["# ", "## ", "###"]:
+        idx = text.find(marker)
+        if idx != -1:
+            start = idx
+            break
+
+    cleaned = text[start:] if start != -1 else text
+
+    # 3) 저장
+    out_dir = "output_etfblogger"
+    os.makedirs(out_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_path = os.path.join(out_dir, f"etf_{ts}.md")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write(cleaned)
+    print(f"📁 결과 저장 완료: {out_path}")
 
 
 def crew_work(my_llm):
@@ -69,12 +93,7 @@ def crew_work(my_llm):
 
     plan = Task(
         description=(
-            "주제: 'ETF 모멘텀 전략 입문 가이드'. "
-            "타깃 독자(초보 투자자)의 니즈를 정의하고, "
-            "개념 설명(ETF/모멘텀), 기본 전략(20/100일 이동평균+최근 20일 수익률 등), "
-            "장단점, 리스크(변동성/최대낙폭/슬리피지/과최적화), "
-            "간이 백테스트 개념 소개, 실전 적용 체크리스트, 마무리/면책 고지를 포함한 "
-            "상세 아웃라인을 작성하라. SEO 키워드도 8~12개 제시."
+            "주제: 'ETF 모멘텀 전략 입문 가이드' 아웃라인 작성(SEO 키워드 포함)"
         ),
         expected_output="아웃라인+타깃 독자 정의+SEO 키워드+참고 리소스(마크다운)",
         agent=planner,
@@ -82,24 +101,27 @@ def crew_work(my_llm):
 
     write = Task(
         description=(
-            "기획안(아웃라인)을 바탕으로 블로그 글을 한국어 마크다운으로 작성하라. "
-            "각 섹션은 2~3개 단락으로, 소제목을 명확히 달 것. "
-            "용어 설명, 간단 예시, 체크리스트, 요약, 다음 단계(예: 더 공부할 자료/주의사항)를 포함. "
-            "투자 권유가 아니라는 문구를 서두와 말미에 명시."
+            "기획안을 바탕으로 **완성된 한국어 마크다운 블로그 글**만 작성하라.\n"
+            "출력 규칙:\n"
+            "1. 첫 줄은 '# ETF 모멘텀 전략 입문 가이드'\n"
+            "2. 이후 '##' 소제목으로 각 섹션 구성, 각 섹션 2~3단락\n"
+            "3. 예시, 체크리스트, 요약, 면책 포함\n"
+            "4. 금지: 코드 예시, 코드블록, Thought, Reasoning, Task, Agent, Final Answer 같은 메타 문장 절대 금지\n\n"
+            "출력 예시:\n"
+            "# ETF 모멘텀 전략 입문 가이드\n\n"
+            "## ETF란?\n"
+            "...본문...\n\n"
+            "## 모멘텀 전략이란?\n"
+            "...본문...\n"
         ),
-        expected_output="마크다운 블로그 글(섹션별 2~3단락, 깔끔한 헤딩/리스트 포함)",
+        expected_output="완성된 한국어 마크다운 글만.",
         agent=writer,
         context=[plan],
     )
 
     edit = Task(
-        description=(
-            "작성 글을 교정/편집하라. 문법/중복/톤을 정리하고, "
-            "리스크 고지와 중립적 표현을 유지하라. "
-            "문서 전반 길이와 흐름을 균형 있게 맞추고, "
-            "최종 마크다운이 바로 게시 가능하도록 마감하라."
-        ),
-        expected_output="최종 마크다운 글(게시 가능 버전)",
+        description=("문법/톤/균형 편집 후 최종본으로 정리"),
+        expected_output="최종 마크다운 글",
         agent=editor,
         context=[write],
     )
@@ -107,15 +129,16 @@ def crew_work(my_llm):
     crew = Crew(
         agents=[planner, writer, editor],
         tasks=[plan, write, edit],
-        verbose=False,
         process=Process.sequential,
+        verbose=False,
     )
 
     result = crew.kickoff(inputs={"topic": "ETF Momentum strategy beginner’s guide"})
-    from IPython.display import Markdown
 
-    Markdown(result.raw)
+    # 저장
+    save_markdown_like_example(result)
 
 
-llm = build_llm()
-crew_work(llm)
+if __name__ == "__main__":
+    llm = build_llm()
+    crew_work(llm)
